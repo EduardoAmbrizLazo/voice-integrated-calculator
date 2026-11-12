@@ -53,3 +53,11 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Python Source Files
+*.pyc
+_pycache__/
+
+#Virtual Environment
+venv/
+.venv
