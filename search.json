@@ -1,0 +1,23 @@
+[
+  {
+    "objectID": "index.html",
+    "href": "index.html",
+    "title": "E155 Final Project Portfolio Website",
+    "section": "",
+    "text": "This repository contains a suggested structure for the final report."
+  },
+  {
+    "objectID": "index.html#portfolio-contents",
+    "href": "index.html#portfolio-contents",
+    "title": "E155 Final Project Portfolio Website",
+    "section": "Portfolio Contents",
+    "text": "Portfolio Contents\nYour portfolio website should include the following items:\n\nAn overview/home page\n\nA 200-word abstract that summarizes what your project does\nA short video which demonstrates your project in operation\nA block diagram of your system\nA table of contents (e.g., links to other resources on the portfolio website)\n\nA main documentation page\n\nA description of the new hardware used by your project\nSchematics for your system\nA link to the Github repository containing the source code for your project\nA complete bill of materials with item name, part number, quantity, unit price, and total price.\n\nAn FPGA design page\n\nA brief summary of the FPGA design\nA block diagram of the HDL you wrote\nAny accompanying documentation necessary to describe its operation (e.g., state transition diagrams). You do not need to cover nitty gritty details like state transition or output logic tables.\n\nAn MCU design page\n\nA brief summary of what the MCU does\nAny diagrams needed to explain the flow of the MCU code\n\nResults\n\nA discussion of the overall performance of the final system\nAny relevant simulation results or oscilloscope traces\nVideos or photos of the final project or any intermediate build steps.\n\nTeam\n\nA list of the team members with a one sentence bio and links to any relevant personal websites or social media presence. As a bonus, add photos here."
+  },
+  {
+    "objectID": "index.html#notes",
+    "href": "index.html#notes",
+    "title": "E155 Final Project Portfolio Website",
+    "section": "Notes",
+    "text": "Notes\n\nDo not upload video files into your Git repo! They are too big. Instead, upload to external video hosting sites (e.g., YouTube or Vimeo) and embed the HTML. You can directly paste the embed HTML code into your Quarto markdown.\nThink of your front page like a pitch. You’re looking to give the reader a quick summary of what your project is and invite them to check it out in more detail.\nHost the portfolio website using Github pages. The most seamless way is to keep all the Quarto source docs inside a docs folder of your project Github repository and run quarto publish from there to render to Github pages. As a reminder, instructions on how to render can be found here."
+  }
+]
