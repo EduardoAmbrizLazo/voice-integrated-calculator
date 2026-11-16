@@ -1,0 +1,39 @@
+---
+title: "E155 Final Project Portfolio Website"
+---
+
+This repository contains a suggested structure for the final report.
+
+## Portfolio Contents
+
+Your portfolio website should include the following items:
+
+1. An overview/home page
+   - [ ] A 200-word abstract that summarizes what your project does
+   - [ ] A short video which demonstrates your project in operation
+   - [ ] A block diagram of your system
+   - [ ] A table of contents (e.g., links to other resources on the portfolio website)
+2. A main documentation page
+   - [ ] A description of the new hardware used by your project
+   - [ ] Schematics for your system
+   - [ ] A link to the Github repository containing the source code for your project
+   - [ ] A complete bill of materials with item name, part number, quantity, unit price, and total price.
+3. An FPGA design page
+   - [ ] A brief summary of the FPGA design
+   - [ ] A block diagram of the HDL you wrote
+   - [ ] Any accompanying documentation necessary to describe its operation (e.g., state transition diagrams). You do not need to cover nitty gritty details like state transition or output logic tables.
+4. An MCU design page
+   - [ ] A brief summary of what the MCU does
+   - [ ] Any diagrams needed to explain the flow of the MCU code
+5. Results
+   - [ ] A discussion of the overall performance of the final system
+   - [ ] Any relevant simulation results or oscilloscope traces
+   - [ ] Videos or photos of the final project or any intermediate build steps.
+6. Team
+   - [ ] A list of the team members with a one sentence bio and links to any relevant personal websites or social media presence. As a bonus, add photos here.
+
+## Notes
+
+- Do not upload video files into your Git repo! They are too big. Instead, upload to external video hosting sites (e.g., YouTube or Vimeo) and embed the HTML. You can directly paste the embed HTML code into your Quarto markdown.
+- Think of your front page like a pitch. You're looking to give the reader a quick summary of what your project is and invite them to check it out in more detail.
+- Host the portfolio website using Github pages. The most seamless way is to keep all the Quarto source docs inside a `docs` folder of your project Github repository and run `quarto publish` from there to render to Github pages. As a reminder, instructions on how to render can be found [here](https://quarto.org/docs/publishing/github-pages.html#publish-command).

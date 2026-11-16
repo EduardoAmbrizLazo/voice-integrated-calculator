@@ -1,0 +1,26 @@
+project:
+  type: website
+
+website:
+  title: "Voice-Integrated Calculator"
+  navbar:
+    tools:
+      - icon: github
+        href: https://github.com/EduardoAmbrizLazo/voice-integrated-calculator
+    left:
+      - href: index.qmd
+        text: Home
+      - href: documentation.qmd 
+      - href: fpga-design.qmd
+      - href: mcu-design.qmd
+      - href: results.qmd
+      - href: team.qmd
+
+format:
+  html:
+    theme: cosmo
+    css: styles.scss
+    toc: true
+
+
+
