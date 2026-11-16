@@ -1,0 +1,17 @@
+# Lattice Radiant pin constraints for the E155 development board (UPduino v3.1
+# and Nucleo-L432KC on one motherboard) plus its ribbon-cable breakout board.
+#
+# MCU -> FPGA SPI runs over the motherboard's own traces through DIP switch SW7.
+# Close the MOSI, MISO and SCK positions; open RX, TX, SDA, SCL and CS.
+#   PB3 (MCU SCK)  -> P21      PB5 (MCU MOSI) -> P10      PB4 (MCU MISO line, used as chip select) -> P12
+ldc_set_location -site {21} [get_ports spi_sck]
+ldc_set_location -site {10} [get_ports spi_mosi]
+ldc_set_location -site {12} [get_ports spi_cs_n]
+# OLED on the breakout board: P6 = J1 pin 5, P4 = J1 pin 6 (side by side, left column).
+ldc_set_location -site {6}  [get_ports oled_scl]
+ldc_set_location -site {4}  [get_ports oled_sda]
+# Optional status LED (high = OLED not acknowledging): P45 = J3 pin 13.
+ldc_set_location -site {45} [get_ports led]
+# The OLED module already has pull-ups on SCL/SDA; these are a weak backup.
+ldc_set_port -iobuf {PULLMODE=100K} [get_ports oled_scl]
+ldc_set_port -iobuf {PULLMODE=100K} [get_ports oled_sda]
