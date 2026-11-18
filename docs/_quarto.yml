@@ -15,6 +15,8 @@ website:
       - href: mcu-design.qmd
       - href: results.qmd
       - href: team.qmd
+      - href: midpoint-report.qmd
+        text: Midpoint Report
 
 format:
   html:
