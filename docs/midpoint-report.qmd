@@ -14,7 +14,7 @@ The Voice-Integrated Calculator (VIC) is a calculator, clock and timer controlle
 
 At the midpoint, the hardware path from microphone to screen works end to end. The MCU continuously reads audio from our I2S microphone. It detects each spoken word by comparing loudness to the background noise level in the room, and reports it on the OLED along with the word's length. The screen also shows a running clock and a live microphone level bar. All of the display text is drawn by the FPGA, whose design is complete. This is what we will demonstrate at checkoff.
 
-What the hardware cannot do yet is tell *which* word was said. Before writing that part in C, we built the full recognition algorithm in Python to make sure it would work. On real recordings it identified words correctly 93% of the time, which beats the 90% goal from our proposal (@sec-risk). Our remaining work is to move that algorithm onto the MCU, add a way for the user to record and save their own word templates, build the calculator, clock and timer logic that responds to recognized words, and wire up the two control buttons.
+What the hardware cannot do yet is tell *which* word was said. Before writing that part in C, we built the full recognition algorithm in Python to make sure it would work. On real recordings it identified words correctly 93% of the time, which beats the 90% goal from our proposal (@sec-risk). Our remaining work is to move that algorithm onto the MCU, add a way for the user to record and save their own word templates, build the calculator, clock and timer logic that responds to recognized words, and program the two control buttons, which are already wired on the breadboard but not yet read by the firmware.
 
 ## System Block Diagram
 
