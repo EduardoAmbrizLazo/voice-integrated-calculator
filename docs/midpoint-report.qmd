@@ -1,15 +1,11 @@
 ---
 title: "Midpoint Report: Voice-Integrated Calculator"
 subtitle: "E155 Final Project: Midpoint Checkoff"
-author: "Cheyenne, Eduardo Ambriz Lazo, Arthur"
+author: "Eduardo Ambriz Lazo, Arthur Cary, Cheyenne Trujillo"
 date: 2026-11-18
 format:
   html:
     toc: true
-  pdf:
-    toc: false
-    number-sections: true
-    geometry: margin=1in
 ---
 
 ## Status Summary
@@ -94,59 +90,37 @@ All of the parts VIC needs have been received, and nothing else needs to be orde
 
 Full source: [src/midpointmain.c](https://github.com/EduardoAmbrizLazo/voice-integrated-calculator/blob/main/src/midpointmain.c)
 
-### Tuning constants
-
-`midpointmain.c:17-23`
-
 ```c
-#define STEP 2          /* 1 = no microphone: just prove MCU -> FPGA -> OLED (shows HELLO)
-                           2 = the checkoff demo                                          */
-
-#define ON_MARGIN   27  /* a slice is "loud" this far above the noise floor (0.376 dB each) */
-#define OFF_MARGIN  16  /* and "quiet" when it falls back below this                        */
-#define I2S_SLOT    0   /* 0 = mic SEL tied to GND, 1 = SEL tied to 3V3                     */
-#define DEBUG       1   /* 1 = show raw microphone numbers on rows 1 and 5 (see bottom of file) */
-```
-
-### SPI driver to the FPGA
-
-`midpointmain.c:38-64`
-
-```c
-static void fpga_send(const uint8_t *buf, int n)        /* one SPI packet, CS framed */
+// midpointmain.c
+int main(void)
 {
-    GPIOB->BSRR = 1u << (4 + 16);
-    for (int i = 0; i < n; i++) {
-        *(volatile uint8_t *)&SPI3->DR = buf[i];
-        while (!(SPI3->SR & SPI_SR_RXNE)) { }
-        (void)*(volatile uint8_t *)&SPI3->DR;
+    hw_init();
+    log_str("\r\nmidpoint (single file)\r\n");
+#if STEP == 1
+    uint32_t last = 0, secs = 0;
+    disp_clear();
+    disp_line(0, 1, "STEP 1: MCU TO FPGA", 0);
+    disp_line(2, 3, "HELLO", 1);
+    for (;;) {
+        if (g_ms - last >= 1000) {
+            char b[24], *p = put_str(b, "SECONDS ");
+            last += 1000;
+            put_int(p, ++secs);
+            disp_line(7, 1, b, 0);
+            log_str(".");
+        }
     }
-    GPIOB->BSRR = 1u << 4;
-    for (volatile int d = 0; d < 200; d++) { }
-}
-
-static void disp_clear(void) { uint8_t b = 0x01; fpga_send(&b, 1); }
-
-/* Write one full row of text.  page = 0..7 (8 pixels each), scale = 1..3. */
-static void disp_line(int page, int scale, const char *s, int centre)
-{
-    int cols = 128 / (6 * scale), len = 0, pad;
-    uint8_t b[3 + 21];
-    while (s[len] && len < cols) len++;
-    pad = centre ? (cols - len) / 2 : 0;
-    b[0] = 0x02;                                        /* "draw text" command    */
-    b[1] = (uint8_t)((128 - cols * 6 * scale) / 2);     /* x position             */
-    b[2] = (uint8_t)(page | (scale << 4));
-    for (int i = 0; i < cols; i++) b[3 + i] = (i >= pad && i < pad + len) ? (uint8_t)s[i - pad] : ' ';
-    fpga_send(b, 3 + cols);
+#else
+    rtc_init();                                 /* can take a few seconds the first time */
+    screen_init();
+    mic_start();
+    for (;;) loop_once();
+#endif
 }
 ```
 
-### I2S capture: DMA interrupt and slice energy
-
-`midpointmain.c:173-200`
-
 ```c
+// midpointmain.c
 static void audio_half(const int32_t *w)
 {
     dbg_irq++;
@@ -177,11 +151,8 @@ void DMA2_Channel1_IRQHandler(void)
 }
 ```
 
-### Word endpointing
-
-`midpointmain.c:217-246`
-
 ```c
+// midpointmain.c
 static void on_slice(int e)                     /* e = loudness of one 16 ms slice    */
 {
     if (floor_q4 < 0) floor_q4 = e << 4;
@@ -214,111 +185,12 @@ static void on_slice(int e)                     /* e = loudness of one 16 ms sli
 }
 ```
 
-### SPI3 setup
-
-`midpointmain.c:299-313`
-
-```c
-    SysTick->VAL  = 0;
-    SysTick->CTRL = SysTick_CTRL_CLKSOURCE_Msk | SysTick_CTRL_TICKINT_Msk | SysTick_CTRL_ENABLE_Msk;
-
-    /* PA2 = USART2_TX (AF7), 115200 baud */
-    GPIOA->AFR[0] = (GPIOA->AFR[0] & ~(0xFu << 8)) | (7u << 8);
-    GPIOA->MODER  = (GPIOA->MODER & ~(3u << 4)) | (2u << 4);
-    USART2->BRR = 80000000u / 115200u;
-    USART2->CR1 = USART_CR1_TE | USART_CR1_UE;
-
-    /* SPI3 to the FPGA: PB3 = SCK, PB5 = MOSI (AF6), PB4 = chip select; mode 0, 312.5 kHz */
-    GPIOB->BSRR   = 1u << 4;
-    GPIOB->AFR[0] = (GPIOB->AFR[0] & ~((0xFu << 12) | (0xFu << 20))) | (6u << 12) | (6u << 20);
-    GPIOB->MODER  = (GPIOB->MODER & ~((3u << 6) | (3u << 8) | (3u << 10))) | (2u << 6) | (1u << 8) | (2u << 10);
-    SPI3->CR2 = (7u << SPI_CR2_DS_Pos) | SPI_CR2_FRXTH;
-    SPI3->CR1 = SPI_CR1_MSTR | SPI_CR1_SSM | SPI_CR1_SSI | (7u << SPI_CR1_BR_Pos) | SPI_CR1_SPE;
-```
-
-### SAI1 I2S receiver + DMA setup
-
-`midpointmain.c:316-350`
-
-```c
-static void mic_start(void)
-{
-    RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
-    RCC->APB2ENR |= RCC_APB2ENR_SAI1EN;
-    /* SAI clock = exactly 4 MHz from the second PLL (PLLSAI1): 4 MHz x 24 / 24.
-     * The SAI then uses it undivided as the bit clock, so 4 MHz / 64 = 62.5 kHz. */
-    RCC->CR &= ~RCC_CR_PLLSAI1ON;
-    while (RCC->CR & RCC_CR_PLLSAI1RDY) { }
-    RCC->PLLSAI1CFGR = (24u << 8) | (24u << 27) | RCC_PLLSAI1CFGR_PLLSAI1PEN;
-    RCC->CR |= RCC_CR_PLLSAI1ON;
-    while (!(RCC->CR & RCC_CR_PLLSAI1RDY)) { }
-    RCC->CCIPR &= ~RCC_CCIPR_SAI1SEL;                           /* 00 = PLLSAI1 "P" output */
-
-    /* PA8 = bit clock, PA9 = word select, PA10 = data in (all AF13) */
-    GPIOA->AFR[1] = (GPIOA->AFR[1] & ~0xFFFu) | 0xDDDu;
-    GPIOA->MODER  = (GPIOA->MODER & ~(0x3Fu << 16)) | (0x2Au << 16);
-
-    /* DMA2 channel 1 <- SAI1 block A: 32-bit words into a circular buffer */
-    DMA2_CSELR->CSELR = (DMA2_CSELR->CSELR & ~DMA_CSELR_C1S) | (1u << DMA_CSELR_C1S_Pos);
-    DMA2_Channel1->CPAR  = (uint32_t)&SAI1_Block_A->DR;
-    DMA2_Channel1->CMAR  = (uint32_t)dma_buf;
-    DMA2_Channel1->CNDTR = 2 * 2 * HALF_FRAMES;
-    DMA2_Channel1->CCR   = DMA_CCR_MINC | DMA_CCR_CIRC | DMA_CCR_HTIE | DMA_CCR_TCIE |
-                           DMA_CCR_PSIZE_1 | DMA_CCR_MSIZE_1 | DMA_CCR_EN;
-    NVIC_SetPriority(DMA2_Channel1_IRQn, 1);
-    NVIC_EnableIRQ(DMA2_Channel1_IRQn);
-
-    /* I2S master receiver: 64 bit clocks per sample, 4 MHz / 64 = 62.5 kHz */
-    SAI1_Block_A->FRCR  = (64u - 1u) | ((32u - 1u) << 8) | SAI_xFRCR_FSDEF | SAI_xFRCR_FSOFF;
-    SAI1_Block_A->SLOTR = (1u << 8) | (3u << 16);
-    SAI1_Block_A->CR2   = 0;
-    SAI1_Block_A->CR1   = SAI_xCR1_MODE_0 | SAI_xCR1_DS | SAI_xCR1_CKSTR | SAI_xCR1_NODIV |
-                          SAI_xCR1_DMAEN;
-    SAI1_Block_A->CR1  |= SAI_xCR1_SAIEN;
-}
-```
-
-### main
-
-`midpointmain.c:352-376`
-
-```c
-int main(void)
-{
-    hw_init();
-    log_str("\r\nmidpoint (single file)\r\n");
-#if STEP == 1
-    uint32_t last = 0, secs = 0;
-    disp_clear();
-    disp_line(0, 1, "STEP 1: MCU TO FPGA", 0);
-    disp_line(2, 3, "HELLO", 1);
-    for (;;) {
-        if (g_ms - last >= 1000) {
-            char b[24], *p = put_str(b, "SECONDS ");
-            last += 1000;
-            put_int(p, ++secs);
-            disp_line(7, 1, b, 0);
-            log_str(".");
-        }
-    }
-#else
-    rtc_init();                                 /* can take a few seconds the first time */
-    screen_init();
-    mic_start();
-    for (;;) loop_once();
-#endif
-}
-```
-
 ## Appendix B: FPGA Code
 
 Full source: [src/fpga/](https://github.com/EduardoAmbrizLazo/voice-integrated-calculator/tree/main/src/fpga)
 
-### top.sv: module pipeline
-
-`fpga/top.sv:22-30`
-
 ```verilog
+// fpga/top.sv
     // SPI Reciever and FIFO 
     logic       rx_valid, rx_first;
     logic [7:0] rx_data;
@@ -330,43 +202,8 @@ Full source: [src/fpga/](https://github.com/EduardoAmbrizLazo/voice-integrated-c
     fifo #(.W(9), .AW(4)) u_fifo (.clk, .rst_n, .push(rx_valid), .din({rx_first, rx_data}),
 ```
 
-### top.sv: framebuffer + I2C output
-
-`fpga/top.sv:79-103`
-
 ```verilog
-    logic [15:0] ram_do;
-    // read data is valid when rd_ok = 1
-    always_ff @(posedge clk) rd_ok <= rd_req & ~wr_en;       
-
-    SP256K u_fb (
-        .CK(clk), .CS(1'b1), .WE(wr_en), .MASKWE(4'b1111),
-        .AD({4'd0, (wr_en ? wr_addr : rd_addr)}), .DI({8'd0, wr_data}), .DO(ram_do),
-        .STDBY(1'b0), .SLEEP(1'b0), .PWROFF_N(1'b1));
-
-    //OLED resfresh to I2C
-    logic       tx_valid, tx_last, tx_ready, nack, scl_o, sda_o;
-    logic [7:0] tx_data;
-    logic [1:0] sda_sync;
-    always_ff @(posedge clk) sda_sync <= {sda_sync[0], oled_sda};
-
-    oled_refresh u_ref (.clk, .rst_n, .invert, .blink_mask, .rd_req, .rd_addr, .rd_ok,
-                        .rd_data(ram_do[7:0]), .tx_valid, .tx_data, .tx_last, .tx_ready);
-    i2c_tx u_i2c (.clk, .rst_n, .valid(tx_valid), .data(tx_data), .last(tx_last), .ready(tx_ready),
-                  .sda_i(sda_sync[1]), .scl_o, .sda_o, .nack);
-
-    // open drain; the OLED module pull-ups
-    assign oled_scl = scl_o ? 1'bz : 1'b0;     
-    assign oled_sda = sda_o ? 1'bz : 1'b0;
-    assign led = nack;
-endmodule
-```
-
-### spi_rx.sv: SPI mode 0 receiver
-
-`fpga/spi_rx.sv:15-37`
-
-```verilog
+// fpga/spi_rx.sv
     always_ff @(posedge clk) begin
         sck_s  <= {sck_s[1:0], sck};
         cs_s   <= {cs_s[1:0], cs_n};
@@ -390,110 +227,4 @@ endmodule
             end
         end
     end
-```
-
-### renderer.sv: command decoder
-
-`fpga/renderer.sv:99-107`
-
-```verilog
-                S_IDLE: if (in_valid && in_first)
-                    case (in_data)
-                        8'h01: begin clr_addr <= '0; state <= S_CLR; end
-                        8'h02: begin raw <= 1'b0; state <= S_X; end
-                        8'h05: begin raw <= 1'b1; state <= S_X; end
-                        8'h03: state <= S_BLINK;
-                        8'h04: state <= S_INV;
-                        default: ;
-                    endcase
-```
-
-### renderer.sv: glyph write to framebuffer
-
-`fpga/renderer.sv:78-82`
-
-```verilog
-            S_WRITE: begin
-                fb_we    = ~x[7] & ~pg[3];
-                fb_waddr = {pg[2:0], x[6:0]};
-                fb_wdata = (prow == 2'd0) ? tall[7:0] : (prow == 2'd1) ? tall[15:8] : tall[23:16];
-            end
-```
-
-### oled_refresh.sv: refresh state machine
-
-`fpga/oled_refresh.sv:76-95`
-
-```verilog
-            case (state)
-                S_PWR: begin
-                    pwr_cnt <= pwr_cnt + 1'b1;
-                    if (&pwr_cnt) state <= S_CMD;
-                end
-                S_CMD: if (tx_ready) begin
-                    if (ci == NCMD - 1) begin ci <= '0; dh <= 1'b0; state <= S_DH; end
-                    else ci <= ci + 6'd1;
-                end
-                S_DH: if (tx_ready) begin
-                    if (dh) begin rd_addr <= '0; state <= S_RD; end
-                    else dh <= 1'b1;
-                end
-                S_RD: if (rd_ok) begin pix <= rd_data; state <= S_TX; end
-                S_TX: if (tx_ready) begin
-                    if (rd_addr == 10'd1023) begin frame <= frame + 5'd1; state <= S_CMD; end
-                    else begin rd_addr <= rd_addr + 10'd1; state <= S_RD; end
-                end
-                default: state <= S_PWR;
-            endcase
-```
-
-### i2c_tx.sv: bit engine
-
-`fpga/i2c_tx.sv:35-60`
-
-```verilog
-                I_STA1: begin sda_o <= 1'b0; if (tick) st <= I_STA2; end      // START
-                I_STA2: begin scl_o <= 1'b0; if (tick) st <= I_B0; end
-                I_B0: begin                                                   // SCL low: set SDA
-                    scl_o <= 1'b0;
-                    sda_o <= (nbit == 4'd8) ? 1'b1 : sh[7];
-                    if (tick) st <= I_B1;
-                end
-                I_B1: begin scl_o <= 1'b1; if (tick) st <= I_B2; end          // SCL high
-                I_B2: if (tick) begin
-                    if (nbit == 4'd8) nack <= sda_i;
-                    st <= I_B3;
-                end
-                I_B3: begin                                                   // SCL low
-                    scl_o <= 1'b0;
-                    if (tick) begin
-                        if (nbit == 4'd8) st <= last_r ? I_STO1 : I_HOLD;
-                        else begin nbit <= nbit + 4'd1; sh <= {sh[6:0], 1'b0}; st <= I_B0; end
-                    end
-                end
-                I_HOLD: if (valid) begin                                      // SCL stays low
-                    sh <= data; last_r <= last; nbit <= 4'd0; div <= '0; st <= I_B0;
-                end
-                I_STO1: begin scl_o <= 1'b0; sda_o <= 1'b0; if (tick) st <= I_STO2; end
-                I_STO2: begin scl_o <= 1'b1; if (tick) st <= I_STO3; end      // STOP
-                I_STO3: begin sda_o <= 1'b1; if (tick) st <= I_STO4; end
-                I_STO4: if (tick) st <= I_IDLE;                               // bus free time
-```
-
-### Pin constraints
-
-`pins.pdc:7-17`
-
-```tcl
-ldc_set_location -site {21} [get_ports spi_sck]
-ldc_set_location -site {10} [get_ports spi_mosi]
-ldc_set_location -site {12} [get_ports spi_cs_n]
-# OLED on the breakout board: P6 = J1 pin 5, P4 = J1 pin 6 (side by side, left column).
-ldc_set_location -site {6}  [get_ports oled_scl]
-ldc_set_location -site {4}  [get_ports oled_sda]
-# Optional status LED (high = OLED not acknowledging): P45 = J3 pin 13.
-ldc_set_location -site {45} [get_ports led]
-# The OLED module already has pull-ups on SCL/SDA; these are a weak backup.
-ldc_set_port -iobuf {PULLMODE=100K} [get_ports oled_scl]
-ldc_set_port -iobuf {PULLMODE=100K} [get_ports oled_sda]
 ```
