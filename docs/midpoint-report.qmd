@@ -1,6 +1,6 @@
 ---
 title: "Midpoint Report: Voice-Integrated Calculator"
-subtitle: "E155 Final Project — Midpoint Checkoff"
+subtitle: "E155 Final Project: Midpoint Checkoff"
 author: "Cheyenne, Eduardo Ambriz Lazo, Arthur"
 date: 2026-11-18
 format:
