@@ -129,14 +129,28 @@ int main(void)
     printf("clock\n");
     mode_reset();
     says("k");
-    ok(says("930") == MW_CLOCK_TYPING, "digits type a time");
-    clk_entry(b);
-    ok(!strcmp(b, "SET 09:30"), "\"nine three zero\" shows SET 09:30");
-    ok(says("=") == MW_CLOCK_SET && H == 9 && M == 30, "\"equals\" sets the clock to 9:30");
-    ok(!clk_typing(), "...and the typing is finished");
-    ok((says("2359s"), H == 23 && M == 59), "\"start\" also sets it: 23:59");
-    ok(says("2500=") == MW_CLOCK_BAD, "25:00 is refused");
-    ok(says("1260=") == MW_CLOCK_BAD, "12:60 is refused");
+    ok(says("1") == MW_CLOCK_TYPING && (clk_entry(b), !strcmp(b, "1_:__")), "\"one\" shows 1_:__ (fills left to right)");
+    ok((says("0"), clk_entry(b), !strcmp(b, "10:__")), "\"zero\" shows 10:__");
+    ok((says("3"), clk_entry(b), !strcmp(b, "10:3_")), "\"three\" shows 10:3_");
+    ok(says("0") == MW_CLOCK_SET && H == 10 && M == 30 && !clk_typing(), "the 4th digit sets it: 10:30, no \"equals\" needed");
+    ok(says("930") == MW_CLOCK_SET && H == 9 && M == 30, "\"nine three zero\" = 09:30 (3..9 first means 03..09)");
+    ok((says("9"), clk_entry(b), !strcmp(b, "09:__")), "...and shows 09:__ after \"nine\"");
+    says("c");
+    ok(says("2359") == MW_CLOCK_SET && H == 23 && M == 59, "\"two three five nine\" = 23:59");
+    ok(says("0000") == MW_CLOCK_SET && H == 0 && M == 0, "\"zero zero zero zero\" = 00:00 (midnight)");
+    says("2");
+    ok(says("5") == MW_CLOCK_BAD_HOUR && (clk_entry(b), !strcmp(b, "2_:__")), "\"two five\": the 5 is refused, 2_ kept");
+    ok(says("3") == MW_CLOCK_TYPING && says("4") == MW_CLOCK_TYPING && says("5") == MW_CLOCK_SET && H == 23 && M == 45,
+       "...then \"three four five\" finishes 23:45");
+    says("12");
+    ok(says("6") == MW_CLOCK_BAD_MIN && (clk_entry(b), !strcmp(b, "12:__")), "minutes starting with 6 are refused, 12: kept");
+    ok(says("59") == MW_CLOCK_SET && H == 12 && M == 59, "...then \"five nine\" finishes 12:59");
+    ok(says("10=") == MW_CLOCK_SET && H == 10 && M == 0, "\"one zero equals\" = 10:00");
+    ok(says("130=") == MW_CLOCK_SET && H == 1 && M == 30, "\"one three zero equals\" = 01:30");
+    ok(says("193=") == MW_CLOCK_SET && H == 19 && M == 30, "\"one nine three equals\" = 19:30");
+    ok(says("2=") == MW_CLOCK_SET && H == 2 && M == 0, "\"two equals\" = 02:00");
+    ok(says("7=") == MW_CLOCK_SET && H == 7 && M == 0, "\"seven equals\" = 07:00");
+    ok(says("12s") == MW_CLOCK_SET && H == 12 && M == 0, "\"start\" works like \"equals\"");
     ok(says("12c") == MW_CLOCK_CANCEL && !clk_typing(), "\"clear\" forgets a half-typed time");
     ok(says("=") == MW_NOT_HERE, "\"equals\" with nothing typed does nothing");
     says("8");
@@ -144,6 +158,16 @@ int main(void)
     says("k");
     ok(!clk_typing(), "leaving the clock forgets a half-typed time");
     ok(says("+") == MW_NOT_HERE, "\"plus\" means nothing on the clock");
+    for (int t = 0; t <= 2359; t++) {                   /* every time a person can say: none refused, none wrong */
+        int hh = t / 100, mm = t % 100;
+        if (hh > 23 || mm > 59) continue;
+        int r = MW_NOT_HERE;
+        clk_reset();
+        r = say(hh / 10); r = say(hh % 10); r = say(mm / 10); r = say(mm % 10);
+        if (r != MW_CLOCK_SET || H != hh || M != mm) { ok(0, "every real time HH MM can be set"); goto done; }
+    }
+    ok(1, "all 1440 real times can be set by saying 4 digits");
+done:
 
     printf("\n%s: %d of %d mode/timer/clock checks passed\n", fails ? "FAIL" : "PASS", total - fails, total);
     return fails ? 1 : 0;

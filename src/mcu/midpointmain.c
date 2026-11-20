@@ -26,7 +26,9 @@
  * Clock and timer (modes.c, clock.c, timer.c): say "clock" to see the time, "clock" again to go back
  * to the calculator; same for "timer". Nothing is lost by switching: a half-typed sum waits, and the
  * timer keeps counting (shown top right as TMR 01:23).
- *   Clock: digits then "equals" (or "start") set the time, e.g. "nine three zero equals" = 09:30.
+ *   Clock: say the time hours first; it is set at the 4th digit: "one zero three zero" = 10:30,
+ *   "nine three zero" = 09:30. Impossible digits are refused as they are heard (see clock.h). Until
+ *   it is set by voice after power-up the clock runs from the build time and says CLOCK NOT SET.
  *   Timer: digits then "start", e.g. "one three zero start" = 1 min 30 s; "stop" pauses, "start"
  *   carries on, "clear" resets. At zero the screen jumps to TIME UP (blinking); any word stops it.
  *
@@ -151,11 +153,20 @@ static void rtc_get(unsigned *h, unsigned *m, unsigned *s)
     *s = ((tr >> 4) & 7) * 10 + (tr & 15);
 }
 
+/* Has the time been set by voice? Kept in RTC backup register 0, which lives with the RTC:
+ * it survives a reset, and is wiped together with the time when the power goes. */
+#define CLOCK_SET_MARK 0xC10C5E7Du
+static int clock_set;
+
 static void rtc_init(void)
 {
     RCC->APB1ENR1 |= RCC_APB1ENR1_PWREN | RCC_APB1ENR1_RTCAPBEN;
     PWR->CR1 |= PWR_CR1_DBP;                            /* allow writes to the RTC domain */
-    if ((RCC->BDCR & RCC_BDCR_RTCEN) && (RTC->ISR & RTC_ISR_INITS)) return;    /* already running */
+    if ((RCC->BDCR & RCC_BDCR_RTCEN) && (RTC->ISR & RTC_ISR_INITS)) {          /* already running */
+        clock_set = RTC->BKP0R == CLOCK_SET_MARK;
+        return;
+    }
+    clock_set = 0;                                      /* fresh start: the time below is only the build time */
 
     RCC->BDCR |= RCC_BDCR_BDRST; RCC->BDCR &= ~RCC_BDCR_BDRST;
     RCC->BDCR |= RCC_BDCR_LSEON;                        /* start the watch crystal        */
@@ -349,7 +360,9 @@ static char shown_big[12];
 static void update_big(void)
 {
     char t[12], *p;
-    if (mode_get() == MODE_CLOCK) {
+    if (mode_get() == MODE_CLOCK && clk_typing()) {
+        clk_entry(t);                                                               /* 10:3_ while typing */
+    } else if (mode_get() == MODE_CLOCK) {
         unsigned h, m, s;
         rtc_get(&h, &m, &s);
         p = put_2d(t, h); *p++ = ':'; p = put_2d(p, m); *p++ = ':'; put_2d(p, s);     /* 14:32:05 */
@@ -366,7 +379,6 @@ static void update_big(void)
 /* The whole screen for the current mode (once taught). note = the line under the big text. */
 static void draw_mode(const char *note)
 {
-    char b[24];
     if (!note) note = "";
     shown_sec = 99; draw_clock();                       /* the title follows the mode */
     if (tmr_state() == TMR_ALARM) {                     /* the timer went off: blink until any word */
@@ -380,9 +392,9 @@ static void draw_mode(const char *note)
     shown_big[0] = 0;                                   /* make update_big redraw */
     switch (mode_get()) {
     case MODE_CLOCK:
-        if (clk_typing()) { clk_entry(b); put_str(b + 9, " THEN ="); }    /* SET 09:30 THEN = */
-        else put_str(b, "TO SET: DIGITS THEN =");
-        disp_line(1, 1, b, 0);
+        disp_line(1, 1, clk_typing() ? "SETTING THE CLOCK"
+                      : clock_set   ? "SAY A TIME TO CHANGE"
+                      :               "CLOCK NOT SET: SAY IT", 0);
         update_big();
         break;
     case MODE_TIMER:
@@ -495,15 +507,18 @@ static void recognise_word(void)                /* a complete word was heard aft
         int h = 0, m = 0, r = mode_word(w, g_ms, &h, &m);
         switch (r) {
         case MW_SWITCHED:
-            put_str(b, mode_get() == MODE_CLOCK ? "SAY CLOCK TO GO BACK"
+            put_str(b, mode_get() == MODE_CLOCK ? (clock_set ? "SAY CLOCK TO GO BACK" : "SAY 4 DIGITS: HHMM")
                      : mode_get() == MODE_TIMER ? "SAY TIMER TO GO BACK" : "BACK TO CALCULATOR");
             break;
         case MW_ALARM_OFF:    put_str(b, "ALARM OFF"); break;
         case MW_CLOCK_SET:
             rtc_set((unsigned)h, (unsigned)m, 0);
+            RTC->BKP0R = CLOCK_SET_MARK;                /* the time is real now */
+            clock_set = 1;
             p = put_str(b, "CLOCK SET TO "); p = put_2d(p, (unsigned)h); *p++ = ':'; put_2d(p, (unsigned)m);
             break;
-        case MW_CLOCK_BAD:    put_str(b, "NOT A REAL TIME"); break;
+        case MW_CLOCK_BAD_HOUR: put_str(b, "HOURS ONLY GO TO 23"); break;
+        case MW_CLOCK_BAD_MIN:  put_str(b, "MINUTES ONLY GO TO 59"); break;
         case MW_CLOCK_CANCEL: put_str(b, "CANCELLED"); break;
         case MW_STOP_FIRST:   put_str(b, "SAY STOP FIRST"); break;
         case MW_NOT_HERE:     p = put_str(b, enr_name(w)); put_str(p, " - NOT HERE"); break;

@@ -22,7 +22,8 @@ enum { MW_CALC,         /* the calculator used it                               
        MW_ALARM_OFF,    /* it stopped the timer's alarm                            */
        MW_CLOCK_TYPING, /* a digit of a new time                                   */
        MW_CLOCK_SET,    /* set the RTC to *h:*m                                    */
-       MW_CLOCK_BAD,    /* not a real time                                         */
+       MW_CLOCK_BAD_HOUR, /* digit dropped: the hour would be over 23              */
+       MW_CLOCK_BAD_MIN,  /* digit dropped: the minutes would be over 59           */
        MW_CLOCK_CANCEL, /* typed time forgotten                                    */
        MW_TIMER,        /* the timer used it                                       */
        MW_STOP_FIRST,   /* a digit while the timer runs                            */

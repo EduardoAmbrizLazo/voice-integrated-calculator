@@ -38,7 +38,8 @@ int mode_word(int w, uint32_t now, int *h, int *m)
         switch (clk_word(w, h, m)) {
         case CLK_TYPING: return MW_CLOCK_TYPING;
         case CLK_SET:    return MW_CLOCK_SET;
-        case CLK_BAD:    return MW_CLOCK_BAD;
+        case CLK_BAD_HOUR: return MW_CLOCK_BAD_HOUR;
+        case CLK_BAD_MIN:  return MW_CLOCK_BAD_MIN;
         case CLK_CANCEL: return MW_CLOCK_CANCEL;
         default:         return MW_NOT_HERE;
         }
