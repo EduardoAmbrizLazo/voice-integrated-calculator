@@ -63,6 +63,7 @@ venv/
 .venv
 tests/host/rec_eval
 tests/host/vic_eval
+tests/host/calc_test
 
 # SEGGER Embedded Studio build output and per-user files
 src/vic_proj/Output/

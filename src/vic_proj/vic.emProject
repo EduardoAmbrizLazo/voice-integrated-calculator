@@ -63,6 +63,8 @@
       <file file_name="../mcu/recog.h" />
       <file file_name="../mcu/enroll.c" />
       <file file_name="../mcu/enroll.h" />
+      <file file_name="../mcu/calc.c" />
+      <file file_name="../mcu/calc.h" />
       <file file_name="../mcu/splash.c" />
       <file file_name="../mcu/splash.h" />
     </folder>

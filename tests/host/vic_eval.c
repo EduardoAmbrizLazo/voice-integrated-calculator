@@ -21,6 +21,7 @@
 #include "dtw.h"
 #include "recog.h"
 #include "enroll.h"
+#include "calc.h"
 #include "wav.h"
 
 #define MAXTAKES 32
@@ -34,6 +35,7 @@ typedef struct { int n; uint8_t f[WC_MAXF][FE_BANDS]; int8_t c[WC_MAXF][CEP_DIM]
 static word_t words[NW][MAXTAKES];
 static int    have[NW][MAXTAKES];               /* 1 = word found, -1 = file but no word */
 static int    verbose;
+static int    got[NW][MAXTAKES];                /* what each take was recognised as (leave-one-out) */
 
 /* Feed a recording through frontend + wordcap; keep the longest word. */
 static int clip_word(const char *path, word_t *out, int *nfound, int *nshort, int *nlong)
@@ -152,15 +154,99 @@ static void evaluate(int k_x10)
             dtw_seq_t q = { (const int8_t (*)[CEP_DIM])words[w][test].c, words[w][test].n };
             int32_t dist;
             int best = rec_classify(&q, seq, lab, nt, &dist);
-            int got = (best < 0 || dist > limit) ? -1 : best;
+            int res = (best < 0 || dist > limit) ? -1 : best;
+            got[w][test] = res;
             if (best == w) tot_ok_norej++;
-            if (got < 0) tot_rej++;
-            else { conf[w][got]++; if (got == w) tot_ok++; }
-            if (verbose || got != w)
+            if (res < 0) tot_rej++;
+            else { conf[w][res]++; if (res == w) tot_ok++; }
+            if (verbose || res != w)
                 printf("  %-8s take %d -> %-8s %5.2f dB (limit %.2f)%s\n", names[w], test,
                        best >= 0 ? names[best] : "-", dist >= DTW_INF ? 0 : dist / DTW_UNITS_PER_DB,
-                       limit / DTW_UNITS_PER_DB, got < 0 ? "  REJECTED" : got != w ? "  WRONG" : "");
+                       limit / DTW_UNITS_PER_DB, res < 0 ? "  REJECTED" : res != w ? "  WRONG" : "");
         }
+    }
+}
+
+/* ---- flash save / load, through enroll.c exactly as the board does it ---- */
+static uint8_t  flash[ENR_SAVE_MAX];
+static uint32_t flash_n;
+static void put(const void *src, uint32_t n) { memcpy(flash + flash_n, src, n); flash_n += n; }
+
+static int flash_test(void)
+{
+    int fails = 0, said[NW][MAXTAKES];
+    enr_begin();
+    for (int w = 0; w < NW; w++)                    /* teach: each word 3 times in a row */
+        for (int k = 0; k < ENR_SAMPLES; k++) {
+            if (have[w][k] != 1) { printf("  flash test skipped: %s_%d missing\n", names[w], k); return 0; }
+            int32_t d;
+            int r = enr_submit((const uint8_t (*)[FE_BANDS])words[w][k].f, words[w][k].n, &d);
+            if (r == ENR_TOO_DIFFERENT || r == ENR_RESTARTED || r == ENR_NO_MEMORY) {
+                printf("  flash test skipped: teaching refused %s take %d\n", names[w], k);
+                return 0;
+            }
+        }
+    if (enr_state() != ENR_READY) { printf("  FAIL  teaching did not finish\n"); return 1; }
+    for (int w = 0; w < NW; w++)
+        for (int k = 0; k < ENR_SAMPLES; k++) {
+            int b; int32_t d, l;
+            said[w][k] = enr_recognize((const uint8_t (*)[FE_BANDS])words[w][k].f, words[w][k].n, &b, &d, &l);
+        }
+    flash_n = 0;
+    uint32_t n = enr_save(put);
+    printf("  pass  saved %u bytes (room for %d)\n", n, (int)ENR_SAVE_MAX);
+    if (n != flash_n || n > ENR_SAVE_MAX) { printf("  FAIL  save size\n"); fails++; }
+
+    enr_abort();                                    /* power off: RAM is gone */
+    flash[100] ^= 1;                                /* one corrupted byte must be refused */
+    if (enr_load(flash) || enr_state() == ENR_READY) { printf("  FAIL  corrupted save was accepted\n"); fails++; }
+    else printf("  pass  corrupted save refused\n");
+    flash[100] ^= 1;
+    static uint8_t blank[ENR_SAVE_MAX];             /* erased flash reads as FF */
+    memset(blank, 0xFF, sizeof blank);
+    if (enr_load(blank)) { printf("  FAIL  blank flash was accepted\n"); fails++; }
+    else printf("  pass  blank flash refused (never taught)\n");
+
+    if (!enr_load(flash) || enr_state() != ENR_READY) { printf("  FAIL  good save not loaded\n"); return fails + 1; }
+    int same = 0;
+    for (int w = 0; w < NW; w++)
+        for (int k = 0; k < ENR_SAMPLES; k++) {
+            int b; int32_t d, l;
+            if (enr_recognize((const uint8_t (*)[FE_BANDS])words[w][k].f, words[w][k].n, &b, &d, &l) == said[w][k]) same++;
+        }
+    if (same != NW * ENR_SAMPLES) { printf("  FAIL  only %d of %d words recognised the same after loading\n", same, NW * ENR_SAMPLES); fails++; }
+    else printf("  pass  after loading, all %d words recognised exactly as before saving\n", same);
+    enr_abort();
+    return fails;
+}
+
+/* ---- whole spoken sums: each word is a real recording, recognised (leave-one-out) ---- */
+static void sentence(const char *text, const int *ws, int nws, int take, const char *want)
+{
+    calc_reset();
+    char heard[160] = "";
+    for (int i = 0; i < nws; i++) {
+        int g = got[ws[i]][take];
+        strcat(heard, g >= 0 ? names[g] : "??");
+        strcat(heard, " ");
+        if (g >= 0) calc_word(g);
+    }
+    int ok = !strcmp(calc_display(), want);
+    printf("  %s  \"%s\" (take %d) -> %s%s\n", ok ? "pass" : "MISS", text, take, calc_display(),
+           ok ? "" : "");
+    if (!ok) printf("        heard: %s\n", heard);
+}
+
+static void sentence_test(void)
+{
+    static const int s1[] = { 7, 12, 6, 13 }, s2[] = { 1, 2, 10, 3, 0, 13 }, s3[] = { 11, 8, 10, 5, 13 };
+    static const int s4[] = { 9, 11, 4, 12, 2, 13 }, s5[] = { 5, 10, 5, 14, 6, 12, 7, 13 };
+    for (int take = 0; take < 3; take++) {
+        sentence("seven multiply six equals", s1, 4, take, "42");
+        sentence("one two plus three zero equals", s2, 6, take, "42");
+        sentence("minus eight plus five equals", s3, 5, take, "-3");
+        sentence("nine minus four multiply two equals", s4, 6, take, "10");
+        sentence("five plus five clear six multiply seven equals", s5, 8, take, "42");
     }
 }
 
@@ -196,6 +282,11 @@ int main(int argc, char **argv)
     }
     if (!tot_n) { fprintf(stderr, "no <word>_<n>.wav files found\n"); return 1; }
 
+    printf("\nflash save / load (last speaker)\n");
+    int flash_fails = flash_test();
+    printf("\nspoken sums: recordings -> recogniser -> calculator (information only)\n");
+    sentence_test();
+
     double acc = 100.0 * tot_ok / tot_n;
     printf("\nFIRMWARE RECOGNIZER (frontend + wordcap + ceps + dtw), %d test words, k = %.1f\n", tot_n, k);
     printf("  word accuracy        : %5.1f%%  (%d/%d, rejections count as errors)\n", acc, tot_ok, tot_n);
@@ -208,7 +299,8 @@ int main(int argc, char **argv)
         for (int b = 0; b < NW; b++)
             if (a != b && conf[a][b]) { printf(" %s->%s x%d", names[a], names[b], conf[a][b]); any = 1; }
     printf("%s\n", any ? "" : " none");
-    printf("\n%s: accuracy %.1f%% %s %.0f%% target\n", acc >= min_acc ? "PASS" : "FAIL", acc,
-           acc >= min_acc ? "meets" : "below", min_acc);
-    return acc >= min_acc ? 0 : 1;
+    int pass = acc >= min_acc && !flash_fails;
+    printf("\n%s: accuracy %.1f%% %s %.0f%% target, flash save/load %s\n", pass ? "PASS" : "FAIL", acc,
+           acc >= min_acc ? "meets" : "below", min_acc, flash_fails ? "FAILED" : "ok");
+    return pass ? 0 : 1;
 }

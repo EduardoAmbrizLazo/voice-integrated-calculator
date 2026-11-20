@@ -120,3 +120,84 @@ int enr_recognize(const uint8_t (*bands)[FE_BANDS], int n, int *best, int32_t *d
     if (*best < 0 || *dist > limit) return -1;
     return *best;
 }
+
+/* ------------------------------------------------------------------ saving */
+#define SAVE_MAGIC    0x54434956u       /* "VICT" */
+#define SAVE_VERSION  1u
+
+typedef struct {
+    uint32_t magic, version;
+    uint32_t nt, pool_used;             /* recordings, frames of storage they use   */
+    int32_t  limit;                     /* reject threshold worked out after teaching */
+    uint32_t samples, nwords;           /* must match this build                    */
+    uint32_t sum;                       /* checksum of everything after the header  */
+} save_hdr_t;
+typedef char save_hdr_is_32_bytes[(sizeof(save_hdr_t) == 32) ? 1 : -1];
+
+static uint32_t fnv(uint32_t h, const void *p, uint32_t n)     /* FNV-1a checksum */
+{
+    const uint8_t *b = p;
+    while (n--) { h ^= *b++; h *= 16777619u; }
+    return h;
+}
+
+/* checksum of: word of each recording, length of each recording, the recordings */
+static uint32_t body_sum(const uint8_t *lab, const uint8_t *len, int n, const int8_t *data, int frames)
+{
+    uint32_t h = 2166136261u;
+    h = fnv(h, lab, (uint32_t)n);
+    h = fnv(h, len, (uint32_t)n);
+    return fnv(h, data, (uint32_t)frames * CEP_DIM);
+}
+
+uint32_t enr_save(void (*put)(const void *src, uint32_t n))
+{
+    if (state != ENR_READY || nt < 1) return 0;
+    uint8_t len[MAXT];
+    for (int i = 0; i < nt; i++) len[i] = (uint8_t)seq[i].n;
+    save_hdr_t h = { SAVE_MAGIC, SAVE_VERSION, (uint32_t)nt, (uint32_t)pool_used, limit,
+                     ENR_SAMPLES, (uint32_t)NWORDS, 0 };
+    h.sum = body_sum(label, len, nt, &pool[0][0], pool_used);
+    put(&h, sizeof h);
+    put(label, (uint32_t)nt);
+    put(len, (uint32_t)nt);
+    put(pool, (uint32_t)pool_used * CEP_DIM);
+    return (uint32_t)(sizeof h + 2u * (uint32_t)nt + (uint32_t)pool_used * CEP_DIM);
+}
+
+int enr_load(const void *blob)
+{
+    save_hdr_t h;
+    const uint8_t *b = blob;
+    for (unsigned i = 0; i < sizeof h; i++) ((uint8_t *)&h)[i] = b[i];
+    if (h.magic != SAVE_MAGIC || h.version != SAVE_VERSION) return 0;
+    if (h.samples != ENR_SAMPLES || h.nwords != (uint32_t)NWORDS) return 0;
+    if (h.nt != (uint32_t)(NWORDS * ENR_SAMPLES) || h.nt > MAXT) return 0;
+    if (h.pool_used > ENR_POOL_FRAMES) return 0;
+
+    const uint8_t *lab = b + sizeof h, *len = lab + h.nt;
+    const int8_t *data = (const int8_t *)(len + h.nt);
+    uint32_t frames = 0;
+    for (uint32_t i = 0; i < h.nt; i++) {
+        if (lab[i] >= NWORDS || len[i] < 1 || len[i] > DTW_MAXLEN) return 0;
+        frames += len[i];
+    }
+    if (frames != h.pool_used) return 0;
+    if (body_sum(lab, len, (int)h.nt, data, (int)h.pool_used) != h.sum) return 0;
+
+    /* all good: copy into RAM and rebuild the list of recordings */
+    enr_abort();
+    for (uint32_t i = 0; i < h.pool_used * CEP_DIM; i++) (&pool[0][0])[i] = data[i];
+    int at = 0;
+    for (uint32_t i = 0; i < h.nt; i++) {
+        seq[i].f = (const int8_t (*)[CEP_DIM])&pool[at];
+        seq[i].n = len[i];
+        label[i] = lab[i];
+        at += len[i];
+    }
+    nt = (int)h.nt;
+    pool_used = (int)h.pool_used;
+    limit = h.limit;
+    state = ENR_READY;
+    return 1;
+}

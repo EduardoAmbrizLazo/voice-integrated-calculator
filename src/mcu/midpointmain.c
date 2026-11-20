@@ -16,7 +16,13 @@
  * recognising: the middle of the screen shows the word it heard and, underneath, how close the match was
  * ("MATCH 1.2 OF 1.7": distance of this word and the limit, in dB). NOT A WORD means it was too far from
  * everything taught. Hold PA0 again to teach again, or to cancel while teaching.
- * The recordings live in RAM, so they are lost at power-off.
+ * When teaching finishes, the recordings are saved in flash (last 32 KB) and loaded again at power-up,
+ * so teaching is needed only once. Teaching again replaces them; cancelling keeps the old ones.
+ *
+ * Calculator (calc.c): once taught, recognised words drive a pocket calculator. Say one word at a
+ * time, e.g. "seven multiply six equals". The big number is the calculator's display, the line above
+ * it the sum so far ("7 X 6 ="), the line below it the word just heard and its match distance.
+ * The clock/timer words are recognised but not used yet.
  *
  * E and F are now measured on the filtered 15.6 kHz signal, so their absolute numbers differ from the
  * checkoff build; only the gap between them matters. The detector margins live in wordcap.h.
@@ -28,12 +34,14 @@
 #include "wordcap.h"        /* finds a word in the frames and keeps them        */
 #include "splash.h"         /* start-up animation                               */
 #include "enroll.h"         /* teach the device your voice, recognise words     */
+#include "calc.h"           /* recognised words -> calculator                   */
 
 #define STEP 2          /* 1 = no microphone: just prove MCU -> FPGA -> OLED (shows HELLO)
                            2 = the checkoff demo                                          */
 
 #define I2S_SLOT    0   /* 0 = mic SEL tied to GND, 1 = SEL tied to 3V3                     */
-#define DEBUG       1   /* 1 = show raw microphone numbers on rows 1 and 5 (see top of file)    */
+#define DEBUG       0   /* 1 = show raw microphone numbers on rows 1 and 5 (see top of file).
+                           Off by default: row 1 shows the calculator's sum                     */
 #define DUMP_WORDS  0   /* 1 = after each word, print its feature frames on the serial port,
                            one line per 16 ms frame, 12 bands as 24 hex digits (for comparing
                            with dtw_poc.py)                                                  */
@@ -90,11 +98,13 @@ static char *put_int(char *p, uint32_t v)
     *p = 0; return p;
 }
 
+#if DEBUG
 static char *put_hex5(char *p, uint32_t v)
 {
     for (int s = 16; s >= 0; s -= 4) *p++ = "0123456789ABCDEF"[(v >> s) & 15];
     *p = 0; return p;
 }
+#endif
 
 static char *put_2d(char *p, unsigned v)             /* two digits, e.g. 07 */
 {
@@ -162,7 +172,7 @@ static void draw_clock(void)                            /* top row: title and HH
     rtc_get(&h, &m, &sec);
     if (sec == shown_sec) return;
     shown_sec = sec;
-    p = put_str(b, "MIDPOINT    ");
+    p = put_str(b, "CALCULATOR  ");
     p = put_2d(p, h); *p++ = ':'; p = put_2d(p, m); *p++ = ':'; put_2d(p, sec);
     disp_line(0, 1, b, 0);
 }
@@ -213,6 +223,75 @@ void DMA2_Channel1_IRQHandler(void)
     if (isr & DMA_ISR_TCIF1) { DMA2->IFCR = DMA_IFCR_CTCIF1; audio_half(&dma_buf[2 * HALF_FRAMES]); }
 }
 
+/* ---------------------------------------------------------- saved teaching */
+/* What teaching learned (enroll.c) is kept in the last 32 KB of flash, pages 112..127, so it
+ * survives power-off. The program itself must stay below 0x08038000 (224 KB); it is about 20 KB. */
+#define SAVE_ADDR   0x08038000u
+#define SAVE_PAGES  16u
+#define PAGE_SIZE   2048u
+typedef char save_fits_in_flash[(ENR_SAVE_MAX <= SAVE_PAGES * PAGE_SIZE) ? 1 : -1];
+#define FLASH_ERRORS (FLASH_SR_OPERR | FLASH_SR_PROGERR | FLASH_SR_WRPERR | FLASH_SR_PGAERR | \
+                      FLASH_SR_SIZERR | FLASH_SR_PGSERR | FLASH_SR_MISERR | FLASH_SR_FASTERR | FLASH_SR_RDERR)
+
+static uint32_t fl_addr, fl_fill;               /* where the next 8 bytes go / bytes collected */
+static uint64_t fl_dw;                          /* flash is written 8 bytes (a "doubleword") at a time */
+static int      fl_ok;
+
+static void flash_wait(void) { while (FLASH->SR & FLASH_SR_BSY) { } }
+
+static void fl_write_dw(void)
+{
+    if (fl_addr + 8 > SAVE_ADDR + SAVE_PAGES * PAGE_SIZE) { fl_ok = 0; return; }
+    FLASH->CR |= FLASH_CR_PG;
+    *(volatile uint32_t *)fl_addr       = (uint32_t)fl_dw;
+    *(volatile uint32_t *)(fl_addr + 4) = (uint32_t)(fl_dw >> 32);
+    flash_wait();
+    if (FLASH->SR & FLASH_ERRORS) fl_ok = 0;
+    FLASH->SR = FLASH_SR_EOP | FLASH_ERRORS;
+    FLASH->CR &= ~FLASH_CR_PG;
+    fl_addr += 8; fl_dw = ~0ull; fl_fill = 0;
+}
+
+static void fl_put(const void *src, uint32_t n)        /* enr_save() hands its bytes to this */
+{
+    const uint8_t *s = src;
+    while (n--) {
+        fl_dw = (fl_dw & ~(0xFFull << (8 * fl_fill))) | ((uint64_t)*s++ << (8 * fl_fill));
+        if (++fl_fill == 8) fl_write_dw();
+    }
+}
+
+/* Erase the save area, write what teaching learned, read it back. About 0.6 s; audio is
+ * paused meanwhile (the CPU stalls while flash is busy anyway). Returns 1 if it worked. */
+static int save_teaching(void)
+{
+    NVIC_DisableIRQ(DMA2_Channel1_IRQn);
+    flash_wait();
+    if (FLASH->CR & FLASH_CR_LOCK) { FLASH->KEYR = 0x45670123u; FLASH->KEYR = 0xCDEF89ABu; }
+    FLASH->SR = FLASH_SR_EOP | FLASH_ERRORS;
+    fl_ok = 1;
+    for (uint32_t i = 0; i < SAVE_PAGES && fl_ok; i++) {
+        uint32_t page = (SAVE_ADDR - FLASH_BASE) / PAGE_SIZE + i;
+        FLASH->CR = (FLASH->CR & ~(FLASH_CR_PNB | FLASH_CR_PG)) | FLASH_CR_PER | (page << FLASH_CR_PNB_Pos);
+        FLASH->CR |= FLASH_CR_STRT;
+        flash_wait();
+        FLASH->CR &= ~FLASH_CR_PER;
+        if (FLASH->SR & FLASH_ERRORS) fl_ok = 0;
+    }
+    fl_addr = SAVE_ADDR; fl_dw = ~0ull; fl_fill = 0;
+    if (fl_ok && !enr_save(fl_put)) fl_ok = 0;
+    if (fl_ok && fl_fill) fl_write_dw();                /* last few bytes (the rest stays FF) */
+    FLASH->CR |= FLASH_CR_LOCK;
+    FLASH->ACR &= ~FLASH_ACR_DCEN;                      /* forget cached copies of the old contents */
+    FLASH->ACR |= FLASH_ACR_DCRST;
+    FLASH->ACR &= ~FLASH_ACR_DCRST;
+    FLASH->ACR |= FLASH_ACR_DCEN;
+    if (fl_ok) fl_ok = enr_load((const void *)SAVE_ADDR);          /* check it reads back */
+    fe_init(); wc_init(); fq_tail = fq_head;            /* audio skipped: start the detector fresh */
+    NVIC_EnableIRQ(DMA2_Channel1_IRQn);
+    return fl_ok;
+}
+
 /* ------------------------------------------------------------ word detector */
 static uint32_t words, last_ms, t_meter, t_done;    /* t_done: when the "teaching complete" message ends */
 static char     big[12] = "READY";
@@ -239,6 +318,15 @@ static void draw(const char *note)
     else if (enr_state() == ENR_IDLE) put_str(b, "HOLD A0 TO TEACH");
     else b[0] = 0;
     disp_line(6, 1, note ? note : b, 0);
+}
+
+/* The calculator screen: the sum so far on row 1, the display big on rows 2..4, a note on row 6. */
+static void show_calc(const char *note)
+{
+    disp_line(1, 1, calc_expr(), 0);
+    put_str(big, calc_display());
+    show_big(big);
+    disp_line(6, 1, note, 0);
 }
 
 /* distance in 1/16 count -> "1.2" (dB; one dB is 2.55 counts) */
@@ -284,7 +372,7 @@ static void screen_init(void);
 
 static void teach_word(void)                    /* a complete word was heard while teaching */
 {
-    char b[64], *p;
+    char b[96], *p;
     int word = enr_word(), sample = enr_sample();
     int32_t dist;
     int r = enr_submit((const uint8_t (*)[FE_BANDS])wc_word.f, wc_word.n, &dist);
@@ -302,15 +390,21 @@ static void teach_word(void)                    /* a complete word was heard whi
         p = put_str(p, "  OUT OF MEMORY");
         enr_abort(); screen_init(); disp_line(6, 1, "OUT OF MEMORY - RETRY", 0);
         break;
-    case ENR_FINISHED:
+    case ENR_FINISHED: {
         p = put_str(p, "  all done");
         disp_line(0, 1, "TEACHING COMPLETE", 0);
         disp_line(1, 1, "", 0);
-        show_big("DONE");
+        show_big("SAVING");
         disp_line(5, 1, "", 0);
-        disp_line(6, 1, "NOW SAY A WORD", 0);
-        t_done = g_ms + 1500u;                  /* then the normal screen comes back */
+        disp_line(6, 1, "", 0);
+        int saved = save_teaching();            /* keep it through power-off */
+        p = put_str(p, saved ? ", saved to flash" : ", FLASH SAVE FAILED");
+        show_big("DONE");
+        disp_line(6, 1, saved ? "SAVED. SAY A SUM" : "NOT SAVED - FLASH ERR", 0);
+        calc_reset();
+        t_done = g_ms + 2000u;                  /* then the calculator screen comes back */
         break;
+    }
     default: break;
     }
     put_str(p, "\r\n"); log_str(b);
@@ -319,21 +413,21 @@ static void teach_word(void)                    /* a complete word was heard whi
 /* ---------------------------------------------------------------- recognising */
 static void recognise_word(void)                /* a complete word was heard after teaching */
 {
-    char b[64], *p;
+    char b[96], *p;
     int best;
     int32_t dist, lim;
     int w = enr_recognize((const uint8_t (*)[FE_BANDS])wc_word.f, wc_word.n, &best, &dist, &lim);
 
     words++;
     last_ms = (uint32_t)wc_word_ms();
-    if (w >= 0) {
-        put_str(big, enr_name(w));
-        p = put_str(b, "MATCH "); p = put_db(p, dist); p = put_str(p, " OF "); put_db(p, lim);
-    } else {
-        put_str(big, "NOT A WORD");
-        p = put_str(b, "NEAREST "); p = put_str(p, enr_name(best)); p = put_str(p, " "); put_db(p, dist);
+    if (w >= 0 && calc_word(w)) {                       /* "SEVEN 1.2 OF 1.7" */
+        p = put_str(b, enr_name(w)); p = put_str(p, " "); p = put_db(p, dist); p = put_str(p, " OF "); put_db(p, lim);
+    } else if (w >= 0) {                                /* clock/timer words: not used yet */
+        p = put_str(b, enr_name(w)); put_str(p, ": NOT IN CALC");
+    } else {                                            /* too far from every taught word */
+        p = put_str(b, "SAY AGAIN ("); p = put_str(p, enr_name(best)); put_str(p, "?)");
     }
-    draw(b);
+    show_calc(b);
 
     p = put_str(b, w >= 0 ? "HEARD " : "UNKNOWN nearest=");
     p = put_str(p, w >= 0 ? enr_name(w) : enr_name(best));
@@ -384,6 +478,7 @@ static void screen_init(void)
     big_scale = 0;
     shown_sec = 99;
     draw_clock();
+    if (enr_state() == ENR_READY) { show_calc("SAY A SUM"); return; }   /* taught: calculator */
     disp_line(1, 1, "SAY A WORD", 0);
     draw(0);
 }
@@ -401,8 +496,10 @@ static void check_teach_button(void)
     if (enr_state() == ENR_TEACHING) {
         enr_abort();
         words = 0; put_str(big, "READY");
+        int back = enr_load((const void *)SAVE_ADDR);   /* go back to the last saved teaching, if any */
+        calc_reset();
         screen_init();
-        log_str("teaching cancelled\r\n");
+        log_str(back ? "teaching cancelled, saved words loaded again\r\n" : "teaching cancelled\r\n");
     } else {
         enr_begin();
         wc_init();
@@ -561,10 +658,13 @@ int main(void)
 #if STARTUP_ANIM
     splash_run();
 #endif
-    screen_init();
     fe_init();
     wc_init();
-    enr_abort();                                /* nothing taught yet */
+    enr_abort();                                /* nothing taught yet...              */
+    int loaded = enr_load((const void *)SAVE_ADDR);     /* ...unless it was saved in flash */
+    calc_reset();
+    screen_init();
+    log_str(loaded ? "taught words loaded from flash\r\n" : "nothing taught yet: hold PA0 for 1 s\r\n");
     mic_start();
     for (;;) loop_once();
 #endif

@@ -68,4 +68,15 @@ int  enr_submit(const uint8_t (*bands)[FE_BANDS], int n, int32_t *dist);
  * *limit the reject threshold (all in 1/16 count; 41 = 1 dB). */
 int  enr_recognize(const uint8_t (*bands)[FE_BANDS], int n, int *best, int32_t *dist, int32_t *limit);
 
+/* Saving what was taught, so it survives power-off (the caller supplies the flash writing).
+ * enr_save: only after teaching is complete (ENR_READY). Calls put() with the bytes to store, in
+ *   order: a header with a checksum, each recording's word and length, then the recordings.
+ *   Returns the number of bytes, or 0 if there is nothing to save. At most ENR_SAVE_MAX bytes.
+ * enr_load: blob = where those bytes were stored. Checks everything (header, sizes, checksum,
+ *   same vocabulary and ENR_SAMPLES); if it is all right, loads it and switches to ENR_READY and
+ *   returns 1. Otherwise changes nothing and returns 0 (never taught, or a half-finished save). */
+#define ENR_SAVE_MAX  (32 + 2 * ENR_MAX_WORDS * ENR_SAMPLES + ENR_POOL_FRAMES * (FE_BANDS - 1))
+uint32_t enr_save(void (*put)(const void *src, uint32_t n));
+int      enr_load(const void *blob);
+
 #endif
