@@ -79,8 +79,6 @@ CENTERS, BAND_Q, SOS = make_filterbank()
 def load_audio(path):
     """Read a WAV, mix to mono, resample to 16 kHz, scale to +/-1."""
     sr, x = wavfile.read(path)
-    if x.ndim > 1:
-        x = x.mean(axis=1)
     if x.dtype == np.int16:
         x = x / 32768.0
     elif x.dtype == np.int32:
@@ -89,6 +87,8 @@ def load_audio(path):
         x = (x.astype(np.float64) - 128.0) / 128.0
     else:
         x = x.astype(np.float64)
+    if x.ndim > 1:                     # mix to mono AFTER scaling (mean() returns float)
+        x = x.mean(axis=1)
     if sr != FS:
         g = np.gcd(int(sr), FS)
         x = signal.resample_poly(x, FS // g, int(sr) // g)
@@ -584,7 +584,7 @@ def main():
         res = evaluate(ds, ds, args.enroll, k_thr=args.k)
         report(res, f"REAL RECORDINGS ({len(ds)} speaker(s))")
         spk = next(iter(ds))
-        example = tuple(ds[spk]["seven"][:2]) if all(ds[spk]["seven"][:2]) else None
+        example = tuple(ds[spk]["seven"][:2]) if all(f is not None for f in ds[spk]["seven"][:2]) else None
     else:
         print("synthetic mode: proves the code path, not real speech accuracy")
         vocab = make_vocab()

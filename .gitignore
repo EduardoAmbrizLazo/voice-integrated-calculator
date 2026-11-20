@@ -61,3 +61,4 @@ _pycache__/
 #Virtual Environment
 venv/
 .venv
+tests/host/rec_eval
