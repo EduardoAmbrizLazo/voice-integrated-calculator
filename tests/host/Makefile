@@ -2,7 +2,7 @@
 #   make            build both tests
 #   make eval       calculator and clock/timer/mode checks, then the firmware recognizer (frontend/wordcap/ceps/dtw/
 #                   enroll/calc in src/mcu) on the recordings, flash save/load and spoken sums
-#   make eval-old   the earlier single-file recognizer (src/mcu/recognizer.c)
+#   make eval-old   the standalone recognizer (src/mcu/recognizer.c)
 CC      ?= cc
 CFLAGS  ?= -O2 -std=c11 -Wall -Wextra -Wshadow
 MCU     := ../../src/mcu

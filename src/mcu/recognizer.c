@@ -9,8 +9,6 @@ const char *const rec_word_name[REC_NWORDS] = {
     "plus", "minus", "multiply", "equals", "clear", "clock", "timer", "start", "stop"
 };
 
-/* Tuned with tests/host/rec_eval on src/proofofconcept/data (91% vs 88% for
- * midpointmain.c's 27/16/8). */
 rec_cfg_t   rec_cfg = { 27, 21, 3, 10, 3, 0 };
 rec_stats_t rec_stats;
 

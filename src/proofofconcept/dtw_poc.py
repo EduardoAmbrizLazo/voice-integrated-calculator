@@ -87,7 +87,7 @@ def load_audio(path):
         x = (x.astype(np.float64) - 128.0) / 128.0
     else:
         x = x.astype(np.float64)
-    if x.ndim > 1:                     # mix to mono AFTER scaling (mean() returns float)
+    if x.ndim > 1:                     # mix to mono after scaling (mean() returns float)
         x = x.mean(axis=1)
     if sr != FS:
         g = np.gcd(int(sr), FS)

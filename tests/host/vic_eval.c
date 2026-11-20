@@ -1,4 +1,4 @@
-/* Accuracy test for the firmware's recognizer (Eduardo's modules in src/mcu):
+/* Accuracy test for the firmware's recognizer (the modules in src/mcu):
  *   frontend.c -> wordcap.c -> ceps.c -> dtw.c / recog.c
  *
  *   vic_eval DIR [--k 2.0] [--min 90] [--verbose]
