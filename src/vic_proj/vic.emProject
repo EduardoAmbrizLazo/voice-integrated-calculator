@@ -49,9 +49,22 @@
     </folder>
     <folder Name="Source Files">
       <configuration Name="Common" filter="c;cpp;cxx;cc;h;s;asm;inc" />
-      <file file_name="../main.c" />
-      <file file_name="../mcu/recognizer.c" />
-      <file file_name="../mcu/recognizer.h" />
+      <file file_name="../mcu/midpointmain.c" />
+      <file file_name="../mcu/frontend.c" />
+      <file file_name="../mcu/frontend.h" />
+      <file file_name="../mcu/fe_tables.h" />
+      <file file_name="../mcu/wordcap.c" />
+      <file file_name="../mcu/wordcap.h" />
+      <file file_name="../mcu/ceps.c" />
+      <file file_name="../mcu/ceps.h" />
+      <file file_name="../mcu/dtw.c" />
+      <file file_name="../mcu/dtw.h" />
+      <file file_name="../mcu/recog.c" />
+      <file file_name="../mcu/recog.h" />
+      <file file_name="../mcu/enroll.c" />
+      <file file_name="../mcu/enroll.h" />
+      <file file_name="../mcu/splash.c" />
+      <file file_name="../mcu/splash.h" />
     </folder>
     <folder Name="System Files">
       <file file_name="SEGGER_THUMB_Startup.s" />

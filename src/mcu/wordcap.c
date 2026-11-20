@@ -9,6 +9,7 @@ static uint8_t ring[RING][FE_BANDS];    /* the last RING frames, newest at ring[
 static unsigned rpos, rseen;
 
 static int floor_q4 = -1;               /* noise floor x16                                 */
+static int warm;                        /* frames seen since wc_init, up to WC_WARMUP      */
 static int in_word, loud_run, quiet_run, frames, peak;
 static int wlen;                        /* frames of this word so far, including pre-roll  */
 static int len_ms;
@@ -17,6 +18,7 @@ void wc_init(void)
 {
     rpos = rseen = 0;
     floor_q4 = -1;
+    warm = 0;
     in_word = loud_run = quiet_run = frames = peak = wlen = len_ms = 0;
     wc_word.n = 0;
 }
@@ -36,6 +38,9 @@ static void store(const uint8_t *b)
 int wc_feed(const fe_frame_t *fr)
 {
     int e = fr->loud;
+    if (warm < WC_WARMUP) { warm++; return WC_NONE; }   /* let the filters settle first */
+    int settling = warm < WC_WARMUP + WC_SETTLE;
+    if (settling) warm++;
 
     for (int k = 0; k < FE_BANDS; k++) ring[rpos][k] = fr->band[k];
     rpos = (rpos + 1) % RING;
@@ -57,7 +62,7 @@ int wc_feed(const fe_frame_t *fr)
             }
         } else {
             loud_run = 0;                       /* follow the room: down fast, up slowly */
-            floor_q4 += ((e << 4) - floor_q4) / (((e << 4) < floor_q4) ? 4 : 32);
+            floor_q4 += ((e << 4) - floor_q4) / (((e << 4) < floor_q4 || settling) ? 4 : 32);
         }
         return WC_NONE;
     }

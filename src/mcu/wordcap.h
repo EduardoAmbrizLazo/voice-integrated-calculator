@@ -24,6 +24,12 @@
 #define WC_OFF_MARGIN  16   /* and "quiet" when it falls back below this                             */
 #endif
 
+#define WC_WARMUP  4        /* frames ignored after wc_init (65 ms): the filters are still
+                               starting, and a near-silent first frame would set the noise
+                               floor far too low, so the room itself would count as a word   */
+#define WC_SETTLE 32        /* for this many frames after the warm-up (0.5 s) the noise
+                               floor follows the room quickly upward too, so it is right
+                               before the first word even right after teaching starts      */
 #define WC_LOUD    3        /* loud frames in a row that start a word                     */
 #define WC_QUIET   8        /* quiet frames in a row that end it                          */
 #define WC_PRE     3        /* frames kept before the first loud one                      */

@@ -62,6 +62,7 @@ _pycache__/
 venv/
 .venv
 tests/host/rec_eval
+tests/host/vic_eval
 
 # SEGGER Embedded Studio build output and per-user files
 src/vic_proj/Output/

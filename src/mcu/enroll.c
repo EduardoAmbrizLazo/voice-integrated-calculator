@@ -61,7 +61,7 @@ int enr_submit(const uint8_t (*bands)[FE_BANDS], int n, int32_t *dist)
     if (pool_used + n > ENR_POOL_FRAMES) return ENR_NO_MEMORY;
 
     int8_t (*dst)[CEP_DIM] = &pool[pool_used];
-    //ceps_word(bands, n, dst);                       /* tentative: only kept if accepted below   */
+    ceps_word(bands, n, dst);                       /* tentative: only kept if accepted below   */
     dtw_seq_t s = { (const int8_t (*)[CEP_DIM])dst, n };
 
     /* it must sound like at least one earlier recording of this word */
@@ -82,7 +82,7 @@ int enr_submit(const uint8_t (*bands)[FE_BANDS], int n, int32_t *dist)
             cur_sample = 0;
             fails = 0;
             dst = &pool[pool_used];
-            //ceps_word(bands, n, dst);
+            ceps_word(bands, n, dst);
             s.f = (const int8_t (*)[CEP_DIM])dst;
             result = ENR_RESTARTED;
         }
@@ -113,7 +113,7 @@ int enr_recognize(const uint8_t (*bands)[FE_BANDS], int n, int *best, int32_t *d
     if (state != ENR_READY || n < 1 || n > DTW_MAXLEN) return -1;
 
     static int8_t probe[DTW_MAXLEN][CEP_DIM];       /* the spoken word, in the same form as the templates (static: keeps the stack small) */
-    //ceps_word(bands, n, probe);
+    ceps_word(bands, n, probe);
     dtw_seq_t w = { (const int8_t (*)[CEP_DIM])probe, n };
 
     *best = rec_classify(&w, seq, label, nt, dist);

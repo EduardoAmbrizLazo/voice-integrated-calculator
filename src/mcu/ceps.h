@@ -18,6 +18,6 @@
 #define CEP_DIM  (FE_BANDS - 1)
 
 /* bands: n frames from wordcap (wc_word.f); out: n frames of CEP_DIM signed bytes */
-//void ceps_word(const uint8_t (*bands)[FE_BANDS], int n, int8_t (*out)[CEP_DIM]);
+void ceps_word(const uint8_t (*bands)[FE_BANDS], int n, int8_t (*out)[CEP_DIM]);
 
 #endif

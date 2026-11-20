@@ -62,14 +62,14 @@ static double *read_mono(const char *path, int *n_out, int *sr_out)
     return x;
 }
 
-int32_t *wav_load(const char *path, int *n_out)
+int32_t *wav_load_rate(const char *path, int rate, double cutoff, double full_scale, int *n_out)
 {
     int n, sr;
     double *x = read_mono(path, &n, &sr);
     if (!x) return NULL;
-    /* Windowed-sinc resampler, cutoff 7 kHz (below the 7.8 kHz Nyquist). */
-    const double fc = 7000.0, pi = 3.14159265358979323846;
-    double step = (double)sr / REC_FS, nc = 2.0 * fc / sr;
+    /* Windowed-sinc resampler with the given cutoff (Hz). */
+    const double pi = 3.14159265358979323846;
+    double step = (double)sr / rate, nc = 2.0 * cutoff / sr;
     if (nc > 1.0) nc = 1.0;
     int half = (int)ceil(16.0 / nc);
     int m = (int)((double)n / step);
@@ -84,10 +84,16 @@ int32_t *wav_load(const char *path, int *n_out)
             double w = 0.5 + 0.5 * cos(pi * u / half);
             s += x[k] * h * w;
         }
-        double v = s * 131072.0;
-        y[i] = (int32_t)lrint(v > 131071 ? 131071 : v < -131072 ? -131072 : v);
+        double v = s * full_scale;
+        y[i] = (int32_t)lrint(v > full_scale - 1 ? full_scale - 1 : v < -full_scale ? -full_scale : v);
     }
     free(x);
     *n_out = m;
     return y;
+}
+
+/* REC_FS with a 7 kHz cutoff, 16-bit full scale -> +-2^17 like the mic's 18-bit samples. */
+int32_t *wav_load(const char *path, int *n_out)
+{
+    return wav_load_rate(path, REC_FS, 7000.0, 131072.0, n_out);
 }
