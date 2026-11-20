@@ -28,7 +28,7 @@
  * timer keeps counting (shown top right as TMR 01:23).
  *   Clock: say the time hours first; it is set at the 4th digit: "one zero three zero" = 10:30,
  *   "nine three zero" = 09:30. Impossible digits are refused as they are heard (see clock.h). Until
- *   it is set by voice after power-up the clock runs from the build time and says CLOCK NOT SET.
+ *   it is set by voice after power-up the clock shows 00:00:00 and says CLOCK NOT SET.
  *   Timer: digits then "start", e.g. "one three zero start" = 1 min 30 s; "stop" pauses, "start"
  *   carries on, "clear" resets. At zero the screen jumps to TIME UP (blinking); any word stops it.
  *
@@ -127,7 +127,7 @@ static char *put_2d(char *p, unsigned v)             /* two digits, e.g. 07 */
 /* The RTC is a separate counter inside the chip, driven by the 32.768 kHz
  * watch crystal on the Nucleo (LSE).  It keeps hours, minutes and seconds by
  * itself; the program only sets it once and then reads it.  It keeps running
- * through a reset, and restarts from the build time after power is removed. */
+ * through a reset; after power is removed it starts again at 00:00:00 until set by voice. */
 static uint8_t bcd(unsigned v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
 
 static void rtc_set(unsigned h, unsigned m, unsigned s)
@@ -166,7 +166,7 @@ static void rtc_init(void)
         clock_set = RTC->BKP0R == CLOCK_SET_MARK;
         return;
     }
-    clock_set = 0;                                      /* fresh start: the time below is only the build time */
+    clock_set = 0;                                      /* fresh start: nobody has said the time yet */
 
     RCC->BDCR |= RCC_BDCR_BDRST; RCC->BDCR &= ~RCC_BDCR_BDRST;
     RCC->BDCR |= RCC_BDCR_LSEON;                        /* start the watch crystal        */
@@ -180,9 +180,7 @@ static void rtc_init(void)
         RCC->BDCR |= RCC_BDCR_RTCSEL_1;
     }
     RCC->BDCR |= RCC_BDCR_RTCEN;
-    const char *t = __TIME__;                           /* "hh:mm:ss" when this file was compiled */
-    rtc_set((unsigned)((t[0] - '0') * 10 + t[1] - '0'), (unsigned)((t[3] - '0') * 10 + t[4] - '0'),
-            (unsigned)((t[6] - '0') * 10 + t[7] - '0'));
+    rtc_set(0, 0, 0);                                   /* shown as 00:00:00 until set by voice */
 }
 
 static unsigned shown_sec = 99;
@@ -193,8 +191,9 @@ static void draw_clock(void)
     unsigned h, m, sec;
     char b[24], *p;
     rtc_get(&h, &m, &sec);
-    if (sec == shown_sec) return;
+    if (sec == shown_sec) return;                       /* redraw once a second (also moves TMR on) */
     shown_sec = sec;
+    if (!clock_set) h = m = sec = 0;                    /* not set yet: 00:00:00 */
     int md = mode_get();
     p = put_str(b, md == MODE_CLOCK ? "CLOCK" : md == MODE_TIMER ? "TIMER" : "CALCULATOR");
     while (p < b + 12) *p++ = ' ';
@@ -365,6 +364,7 @@ static void update_big(void)
     } else if (mode_get() == MODE_CLOCK) {
         unsigned h, m, s;
         rtc_get(&h, &m, &s);
+        if (!clock_set) h = m = s = 0;                                              /* not set yet */
         p = put_2d(t, h); *p++ = ':'; p = put_2d(p, m); *p++ = ':'; put_2d(p, s);     /* 14:32:05 */
     } else if (mode_get() == MODE_TIMER && tmr_state() != TMR_ALARM) {
         tmr_text(t, g_ms);                                                          /* 01:30 */
