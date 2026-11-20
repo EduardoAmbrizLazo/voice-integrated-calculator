@@ -2,7 +2,7 @@
  *
  *   digits      type the time, filling from the right like a microwave:
  *               "one three zero" -> 01:30, "four five" -> 00:45 (minutes:seconds, up to 99:99;
- *               "nine nine" = 99 s, which runs as 01:39)
+ *               "nine nine" = 99 s, which runs as 01:39; anything over 99:59 runs as 99:59)
  *   "start"     start, or carry on after a pause
  *   "stop"      pause
  *   "clear"     stop and go back to 00:00
@@ -15,6 +15,8 @@
 #define TIMER_H
 
 #include <stdint.h>
+
+#define TMR_MAX_S  5999u        /* longest timer, 99:59 (the screen shows 2 minute digits) */
 
 enum { TMR_SET,         /* stopped: digits type a time                         */
        TMR_RUNNING,     /* counting down                                       */

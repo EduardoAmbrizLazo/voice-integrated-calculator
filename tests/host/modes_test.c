@@ -103,6 +103,17 @@ int main(void)
     ok(tmr_state() == TMR_SET && timer_is("00:00"), "\"clear\" stops and resets it");
     says("s");
     ok(tmr_state() == TMR_SET, "\"start\" with nothing typed does nothing");
+    says("9999s");
+    ok(timer_is("99:59"), "99:99 (100 min 39 s) is capped: runs as 99:59, not 00:39");
+    wait_ms(1000);
+    ok(timer_is("99:58"), "...and counts down from there");
+    says("c");
+    says("9960s");
+    ok(timer_is("99:59"), "99:60 is capped at 99:59 too");
+    says("c");
+    says("9959s");
+    ok(timer_is("99:59"), "99:59 itself still works");
+    says("c");
     says("12345");
     ok(timer_is("23:45"), "more than 4 digits keeps the last 4");
     says("ps");

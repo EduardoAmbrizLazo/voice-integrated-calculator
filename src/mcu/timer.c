@@ -27,6 +27,7 @@ int tmr_word(int w, uint32_t now)
         if (st == TMR_PAUSED) { end_ms = now + left_ms; st = TMR_RUNNING; }
         else if (st == TMR_SET) {
             uint32_t secs = (typed / 100) * 60 + typed % 100;
+            if (secs > TMR_MAX_S) secs = TMR_MAX_S;             /* 99:99 would be 100:39: the screen has 2 minute digits */
             if (secs) { end_ms = now + secs * 1000u; st = TMR_RUNNING; }
         }
         return TMR_USED;
