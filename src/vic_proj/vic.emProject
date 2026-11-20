@@ -65,6 +65,13 @@
       <file file_name="../mcu/enroll.h" />
       <file file_name="../mcu/calc.c" />
       <file file_name="../mcu/calc.h" />
+      <file file_name="../mcu/modes.c" />
+      <file file_name="../mcu/modes.h" />
+      <file file_name="../mcu/clock.c" />
+      <file file_name="../mcu/clock.h" />
+      <file file_name="../mcu/timer.c" />
+      <file file_name="../mcu/timer.h" />
+      <file file_name="../mcu/words.h" />
       <file file_name="../mcu/splash.c" />
       <file file_name="../mcu/splash.h" />
     </folder>

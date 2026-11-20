@@ -22,7 +22,13 @@
  * Calculator (calc.c): once taught, recognised words drive a pocket calculator. Say one word at a
  * time, e.g. "seven multiply six equals". The big number is the calculator's display, the line above
  * it the sum so far ("7 X 6 ="), the line below it the word just heard and its match distance.
- * The clock/timer words are recognised but not used yet.
+ *
+ * Clock and timer (modes.c, clock.c, timer.c): say "clock" to see the time, "clock" again to go back
+ * to the calculator; same for "timer". Nothing is lost by switching: a half-typed sum waits, and the
+ * timer keeps counting (shown top right as TMR 01:23).
+ *   Clock: digits then "equals" (or "start") set the time, e.g. "nine three zero equals" = 09:30.
+ *   Timer: digits then "start", e.g. "one three zero start" = 1 min 30 s; "stop" pauses, "start"
+ *   carries on, "clear" resets. At zero the screen jumps to TIME UP (blinking); any word stops it.
  *
  * E and F are now measured on the filtered 15.6 kHz signal, so their absolute numbers differ from the
  * checkoff build; only the gap between them matters. The detector margins live in wordcap.h.
@@ -35,6 +41,9 @@
 #include "splash.h"         /* start-up animation                               */
 #include "enroll.h"         /* teach the device your voice, recognise words     */
 #include "calc.h"           /* recognised words -> calculator                   */
+#include "modes.h"          /* calculator / clock / timer, switched by voice    */
+#include "timer.h"
+#include "clock.h"
 
 #define STEP 2          /* 1 = no microphone: just prove MCU -> FPGA -> OLED (shows HELLO)
                            2 = the checkoff demo                                          */
@@ -74,6 +83,7 @@ static void fpga_send(const uint8_t *buf, int n)        /* one SPI packet, CS fr
 }
 
 static void disp_clear(void) { uint8_t b = 0x01; fpga_send(&b, 1); }
+static void disp_blink(uint8_t pages) { uint8_t b[2] = { 0x03, pages }; fpga_send(b, 2); }  /* bit n = page n */
 
 /* Write one full row of text.  page = 0..7 (8 pixels each), scale = 1..3. */
 static void disp_line(int page, int scale, const char *s, int centre)
@@ -165,15 +175,20 @@ static void rtc_init(void)
 }
 
 static unsigned shown_sec = 99;
-static void draw_clock(void)                            /* top row: title and HH:MM:SS */
+/* Top row: the mode on the left; on the right HH:MM:SS, or the timer ("TMR 01:23") while it is
+ * running or paused and the timer screen is not showing. Set shown_sec = 99 to force a redraw. */
+static void draw_clock(void)
 {
     unsigned h, m, sec;
     char b[24], *p;
     rtc_get(&h, &m, &sec);
     if (sec == shown_sec) return;
     shown_sec = sec;
-    p = put_str(b, "CALCULATOR  ");
-    p = put_2d(p, h); *p++ = ':'; p = put_2d(p, m); *p++ = ':'; put_2d(p, sec);
+    int md = mode_get();
+    p = put_str(b, md == MODE_CLOCK ? "CLOCK" : md == MODE_TIMER ? "TIMER" : "CALCULATOR");
+    while (p < b + 12) *p++ = ' ';
+    if (tmr_active() && md != MODE_TIMER) { p = put_str(p, "TMR "); tmr_text(p, g_ms); }
+    else { p = put_2d(p, h); *p++ = ':'; p = put_2d(p, m); *p++ = ':'; put_2d(p, sec); }
     disp_line(0, 1, b, 0);
 }
 
@@ -329,6 +344,60 @@ static void show_calc(const char *note)
     disp_line(6, 1, note, 0);
 }
 
+/* Clock and timer: the big line is the time, redrawn only when the text changes. */
+static char shown_big[12];
+static void update_big(void)
+{
+    char t[12], *p;
+    if (mode_get() == MODE_CLOCK) {
+        unsigned h, m, s;
+        rtc_get(&h, &m, &s);
+        p = put_2d(t, h); *p++ = ':'; p = put_2d(p, m); *p++ = ':'; put_2d(p, s);     /* 14:32:05 */
+    } else if (mode_get() == MODE_TIMER && tmr_state() != TMR_ALARM) {
+        tmr_text(t, g_ms);                                                          /* 01:30 */
+    } else return;
+    int same = 1;
+    for (int i = 0; t[i] || shown_big[i]; i++) if (t[i] != shown_big[i]) { same = 0; break; }
+    if (same) return;
+    put_str(shown_big, t);
+    show_big(t);
+}
+
+/* The whole screen for the current mode (once taught). note = the line under the big text. */
+static void draw_mode(const char *note)
+{
+    char b[24];
+    if (!note) note = "";
+    shown_sec = 99; draw_clock();                       /* the title follows the mode */
+    if (tmr_state() == TMR_ALARM) {                     /* the timer went off: blink until any word */
+        disp_line(1, 1, "TIMER DONE", 0);
+        show_big("TIME UP");
+        disp_line(6, 1, *note ? note : "SAY ANY WORD", 0);
+        disp_blink(0x1C);                               /* pages 2..4: the big text */
+        return;
+    }
+    disp_blink(0);
+    shown_big[0] = 0;                                   /* make update_big redraw */
+    switch (mode_get()) {
+    case MODE_CLOCK:
+        if (clk_typing()) { clk_entry(b); put_str(b + 9, " THEN ="); }    /* SET 09:30 THEN = */
+        else put_str(b, "TO SET: DIGITS THEN =");
+        disp_line(1, 1, b, 0);
+        update_big();
+        break;
+    case MODE_TIMER:
+        disp_line(1, 1, tmr_state() == TMR_RUNNING ? "RUNNING. STOP=PAUSE"
+                      : tmr_state() == TMR_PAUSED  ? "PAUSED. START/CLEAR"
+                      :                              "DIGITS, THEN START", 0);
+        update_big();
+        break;
+    default:
+        show_calc(*note ? note : "SAY A SUM");
+        return;
+    }
+    disp_line(6, 1, note, 0);
+}
+
 /* distance in 1/16 count -> "1.2" (dB; one dB is 2.55 counts) */
 static char *put_db(char *p, int32_t units)
 {
@@ -401,7 +470,7 @@ static void teach_word(void)                    /* a complete word was heard whi
         p = put_str(p, saved ? ", saved to flash" : ", FLASH SAVE FAILED");
         show_big("DONE");
         disp_line(6, 1, saved ? "SAVED. SAY A SUM" : "NOT SAVED - FLASH ERR", 0);
-        calc_reset();
+        mode_reset();
         t_done = g_ms + 2000u;                  /* then the calculator screen comes back */
         break;
     }
@@ -420,14 +489,30 @@ static void recognise_word(void)                /* a complete word was heard aft
 
     words++;
     last_ms = (uint32_t)wc_word_ms();
-    if (w >= 0 && calc_word(w)) {                       /* "SEVEN 1.2 OF 1.7" */
-        p = put_str(b, enr_name(w)); p = put_str(p, " "); p = put_db(p, dist); p = put_str(p, " OF "); put_db(p, lim);
-    } else if (w >= 0) {                                /* clock/timer words: not used yet */
-        p = put_str(b, enr_name(w)); put_str(p, ": NOT IN CALC");
-    } else {                                            /* too far from every taught word */
+    if (w < 0) {                                        /* too far from every taught word */
         p = put_str(b, "SAY AGAIN ("); p = put_str(p, enr_name(best)); put_str(p, "?)");
+    } else {
+        int h = 0, m = 0, r = mode_word(w, g_ms, &h, &m);
+        switch (r) {
+        case MW_SWITCHED:
+            put_str(b, mode_get() == MODE_CLOCK ? "SAY CLOCK TO GO BACK"
+                     : mode_get() == MODE_TIMER ? "SAY TIMER TO GO BACK" : "BACK TO CALCULATOR");
+            break;
+        case MW_ALARM_OFF:    put_str(b, "ALARM OFF"); break;
+        case MW_CLOCK_SET:
+            rtc_set((unsigned)h, (unsigned)m, 0);
+            p = put_str(b, "CLOCK SET TO "); p = put_2d(p, (unsigned)h); *p++ = ':'; put_2d(p, (unsigned)m);
+            break;
+        case MW_CLOCK_BAD:    put_str(b, "NOT A REAL TIME"); break;
+        case MW_CLOCK_CANCEL: put_str(b, "CANCELLED"); break;
+        case MW_STOP_FIRST:   put_str(b, "SAY STOP FIRST"); break;
+        case MW_NOT_HERE:     p = put_str(b, enr_name(w)); put_str(p, " - NOT HERE"); break;
+        default:                                        /* used: "SEVEN 1.2 OF 1.7" */
+            p = put_str(b, enr_name(w)); p = put_str(p, " "); p = put_db(p, dist); p = put_str(p, " OF "); put_db(p, lim);
+            break;
+        }
     }
-    show_calc(b);
+    draw_mode(b);
 
     p = put_str(b, w >= 0 ? "HEARD " : "UNKNOWN nearest=");
     p = put_str(p, w >= 0 ? enr_name(w) : enr_name(best));
@@ -445,7 +530,9 @@ static void on_frame(const fe_frame_t *fr)      /* one 16 ms feature frame */
     if (r == WC_NONE) return;
     if (r == WC_SHORT) { log_str("click ignored\r\n"); return; }
     if (r == WC_LONG) {
-        if (enr_state() == ENR_TEACHING) teach_draw("TOO LONG - AGAIN"); else draw("TOO LONG - TRY AGAIN");
+        if (enr_state() == ENR_TEACHING) teach_draw("TOO LONG - AGAIN");
+        else if (enr_state() == ENR_READY) draw_mode("TOO LONG - TRY AGAIN");
+        else draw("TOO LONG - TRY AGAIN");
         log_str("sound too long\r\n");
         return;
     }
@@ -478,7 +565,7 @@ static void screen_init(void)
     big_scale = 0;
     shown_sec = 99;
     draw_clock();
-    if (enr_state() == ENR_READY) { show_calc("SAY A SUM"); return; }   /* taught: calculator */
+    if (enr_state() == ENR_READY) { draw_mode(0); return; }   /* taught: calculator / clock / timer */
     disp_line(1, 1, "SAY A WORD", 0);
     draw(0);
 }
@@ -497,7 +584,7 @@ static void check_teach_button(void)
         enr_abort();
         words = 0; put_str(big, "READY");
         int back = enr_load((const void *)SAVE_ADDR);   /* go back to the last saved teaching, if any */
-        calc_reset();
+        mode_reset();
         screen_init();
         log_str(back ? "teaching cancelled, saved words loaded again\r\n" : "teaching cancelled\r\n");
     } else {
@@ -523,6 +610,12 @@ static void loop_once(void)
     if (t_done && (int32_t)(g_ms - t_done) >= 0) { t_done = 0; screen_init(); }
     if (g_ms - t_meter >= 200) {                /* clock and level meter, 5 times a second */
         int busy = enr_state() == ENR_TEACHING || t_done;     /* the teaching screens use rows 0 and 1 */
+        if (enr_state() == ENR_READY) {
+            if (mode_tick(g_ms)) {                              /* the timer reached zero */
+                log_str("timer done\r\n");
+                if (!busy) draw_mode(0);
+            } else if (!busy) update_big();                     /* clock / timer digits */
+        }
         if (!busy) draw_clock();
         char b[24], *p = put_str(b, "MIC ");
         int bars = wc_take_peak() / 6;
@@ -662,7 +755,7 @@ int main(void)
     wc_init();
     enr_abort();                                /* nothing taught yet...              */
     int loaded = enr_load((const void *)SAVE_ADDR);     /* ...unless it was saved in flash */
-    calc_reset();
+    mode_reset();
     screen_init();
     log_str(loaded ? "taught words loaded from flash\r\n" : "nothing taught yet: hold PA0 for 1 s\r\n");
     mic_start();
